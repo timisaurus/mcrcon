@@ -6,26 +6,20 @@ Warning: invalid packet size (5106). Must over 10 and less than 4096.
 
 ---
 
-### Installing:
+##### Installing / building from sources::
 
-##### via packet manager:
-See https://pkgs.org/download/mcrcon for available packages in various Linux distros (note that available packages might be outdated).
+Since this is a fork you have to pull the code and build it yourself.
 
-- Gentoo Linux: https://packages.gentoo.org/packages/games-util/mcrcon
-- Arch Linux: https://aur.archlinux.org/packages/mcrcon/
-
-##### building from sources:
-```sh
+sudo apt-get update && sudo apt-get install -y gcc
+#reboot might be neccecarry
+reboot 
+cd /opt
 git clone https://github.com/timisaurus/mcrcon.git
-cd mcrcon
-make
+cd mcrcon/
+sudo make
 sudo make install
-```
+
 Check [INSTALL.md](INSTALL.md) for more details.
-
-
-
-<sub>*At the moment binaries are provided for Linux and Windows.</sub>
 
 ---
 
@@ -76,7 +70,7 @@ rcon.password=your_rcon_pasword
 
 ---
 
-##### Contact:
+##### Credit to:
 
 * WWW:            https://github.com/Tiiffi/mcrcon/
 * MAIL:           tiiffi+mcrcon at gmail
