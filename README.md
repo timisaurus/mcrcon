@@ -1,6 +1,8 @@
 # mcrcon
 
 mcrcon is console based Minecraft [rcon](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol) client for remote administration and server maintenance scripts.
+This fork was made so mcrcon can recieve multiple packets and therefore return outputs longer than 4096 bytes.
+Warning: invalid packet size (5106). Must over 10 and less than 4096.
 
 ---
 
@@ -14,14 +16,14 @@ See https://pkgs.org/download/mcrcon for available packages in various Linux dis
 
 ##### building from sources:
 ```sh
-git clone https://github.com/Tiiffi/mcrcon.git
+git clone https://github.com/timisaurus/mcrcon.git
 cd mcrcon
 make
 sudo make install
 ```
 Check [INSTALL.md](INSTALL.md) for more details.
 
-Precompiled binaries (if provided)*: https://github.com/Tiiffi/mcrcon/releases/latest
+
 
 <sub>*At the moment binaries are provided for Linux and Windows.</sub>
 
@@ -44,6 +46,7 @@ Option:
   -w            Wait for specified duration (seconds) between each command (1 - 600s)
   -h            Print usage
   -v            Version information
+  -b            Adjust data buffersize (default: 4096)
 ```
 Server address, port and password can be set using following environment variables:
 ```

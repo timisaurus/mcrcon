@@ -59,6 +59,8 @@
 
 #define DATA_BUFFSIZE 4096
 
+int data_buffsize = DATA_BUFFSIZE;
+
 // rcon packet structure
 typedef struct _rc_packet {
     int size;
@@ -68,6 +70,13 @@ typedef struct _rc_packet {
     // ignoring string2 for now
 } rc_packet;
 
+// rcon recive packet structure
+typedef struct _rc_recv_packet {
+    int size;
+    int id;
+    int cmd;
+    char *data;
+} rc_recv_packet;
 
 // ===================================
 //  FUNCTION DEFINITIONS              
@@ -81,7 +90,7 @@ void        net_close(int sd);
 int         net_connect(const char *host, const char *port);
 int         net_send(int sd, const uint8_t *buffer, size_t size);
 int         net_send_packet(int sd, rc_packet *packet);
-rc_packet*  net_recv_packet(int sd);
+rc_recv_packet*  net_recv_packet(int sd);
 int         net_clean_incoming(int sd, int size);
 
 // Misc stuff
@@ -95,7 +104,7 @@ int         run_commands(int argc, char *argv[]);
 
 // Rcon protocol related functions
 rc_packet*  packet_build(int id, int cmd, char *s1);
-void        packet_print(rc_packet *packet);
+void        packet_print(rc_recv_packet *packet);
 int         rcon_auth(int sock, char *passwd);
 int         rcon_command(int sock, char *command);
 
@@ -179,7 +188,7 @@ int main(int argc, char *argv[])
 	// default getopt error handler enabled
 	opterr = 1;
 	int opt;
-	while ((opt = getopt(argc, argv, "vrtcshw:H:p:P:")) != -1)
+	while ((opt = getopt(argc, argv, "vrtcshw:H:p:P:b:")) != -1)
 	{
 		switch (opt) {
 			case 'H': host = optarg;                break;
@@ -201,6 +210,13 @@ int main(int argc, char *argv[])
 
 			case 'h': usage(); break;
 			case '?':
+			case 'b':
+                data_buffsize = atoi(optarg);
+                if (data_buffsize <= 0) {
+                    fprintf(stderr, "Invalid buffer size: %s\n", optarg);
+                    exit(EXIT_FAILURE);
+                }
+		    break;
 			default:
 				puts("Try 'mcrcon -h' or 'man mcrcon' for help.");
 				exit(EXIT_FAILURE);
@@ -412,49 +428,75 @@ int net_send_packet(int sd, rc_packet *packet)
 	return ret == -1 ? -1 : 1;
 }
 
-rc_packet *net_recv_packet(int sd)
+rc_recv_packet *net_recv_packet(int sd)
 {
-	int psize;
-	static rc_packet packet = {0, 0, 0, { 0x00 }};
+	if (data_buffsize == 0) data_buffsize = DATA_BUFFSIZE;
 
-	// packet.size = packet.id = packet.cmd = 0;
+	int psize = 4106;
+	int offset = 0;
+	char packet_buffer[4098];
+	static rc_recv_packet packet = {0, 0, 0, NULL};
+    // Allocate memory for the data field
+    packet.data = malloc(data_buffsize);
+    if (!packet.data) {
+        fprintf(stderr, "Error: Memory allocation failed.\n");
+        return NULL;
+    }
 
-	int ret = recv(sd, (char *) &psize, sizeof(int), 0);
+	while (psize == 4106 && offset < data_buffsize) {
 
-	if (ret == 0) {
-		fprintf(stderr, "Connection lost.\n");
-		global_connection_alive = 0;
-		return NULL;
-	}
+		int ret = recv(sd, (char *) &psize, sizeof(int), 0);
 
-	if (ret != sizeof(int)) {
-		fprintf(stderr, "Error: recv() failed. Invalid packet size (%d).\n", ret);
-		global_connection_alive = 0;
-		return NULL;
-	}
-
-	// NOTE(Tiiffi): This should fail if size is out of spec!
-	if (psize < 10 || psize > DATA_BUFFSIZE) {
-		fprintf(stderr, "Warning: invalid packet size (%d). Must over 10 and less than %d.\n", psize, DATA_BUFFSIZE);
-
-		if(psize > DATA_BUFFSIZE  || psize < 0) psize = DATA_BUFFSIZE;
-		net_clean_incoming(sd, psize);
-
-		return NULL;
-	}
-
-	packet.size = psize;
-
-	int received = 0;
-	while (received < psize) {
-		ret = recv(sd, (char *) &packet + sizeof(int) + received, psize - received, 0);
-		if (ret == 0) { /* connection closed before completing receving */
+		if (ret == 0) {
 			fprintf(stderr, "Connection lost.\n");
 			global_connection_alive = 0;
 			return NULL;
 		}
 
-		received += ret;
+		if (ret != sizeof(int)) {
+			fprintf(stderr, "Error: recv() failed. Invalid packet size (%d).\n", ret);
+			global_connection_alive = 0;
+			return NULL;
+		}
+
+		packet.size = psize;
+		// NOTE(Tiiffi): This should fail if size is out of spec!
+		if (psize < 10 || psize > data_buffsize) {
+			fprintf(stderr, "Warning: invalid packet size (%d). Must over 10 and less than %d.\n", psize, data_buffsize);
+
+			if(psize > data_buffsize  || psize < 0) psize = data_buffsize;
+			net_clean_incoming(sd, psize);
+			return NULL;
+		}
+
+		// Read packet.id and packet.cmd
+		ret = recv(sd, (char *) &packet.id, sizeof(int), 0);
+		if (ret!= sizeof(int)) {
+			fprintf(stderr, "Error: recv() failed. Invalid packet id (%d).\n", ret);
+			global_connection_alive = 0;
+			return NULL;
+		}
+
+		ret = recv(sd, (char *) &packet.cmd, sizeof(int), 0);
+		if (ret!= sizeof(int)) {
+			fprintf(stderr, "Error: recv() failed. Invalid packet cmd (%d).\n", ret);
+			global_connection_alive = 0;
+			return NULL;
+		}
+		
+		// Read the remaining data into packet.data
+		int remaining = psize - 2 * sizeof(int);
+		ret = recv(sd, packet_buffer, remaining, 0);
+		if (ret!= remaining) {
+			fprintf(stderr, "Error: recv() failed. Invalid packet data (%d).\n", ret);
+			global_connection_alive = 0;
+			return NULL;
+		}
+
+		strncpy((char*)packet.data + offset, packet_buffer, 4098);
+
+		int current_len = strlen(packet_buffer);
+		offset += current_len;
 	}
 
 	return &packet;
@@ -518,7 +560,7 @@ void print_color(int color)
 }
 
 // this hacky mess might use some optimizing
-void packet_print(rc_packet *packet)
+void packet_print(rc_recv_packet *packet)
 {
 	if (global_raw_output == 1) {
 		for (int i = 0; packet->data[i] != 0; ++i)
@@ -539,7 +581,7 @@ void packet_print(rc_packet *packet)
 
 	// colors enabled so try to handle the bukkit colors for terminal
 	if (global_disable_colors == 0) {
-		for (i = 0; (unsigned char) packet->data[i] != 0; ++i) {
+		for (i = 0; packet->data[i]!= 0; ++i) {
 			if (packet->data[i] == 0x0A) print_color(def_color);
 			else if((unsigned char) packet->data[i] == 0xc2 && (unsigned char) packet->data[i+1] == 0xa7) {
 				print_color(packet->data[i+=2]);
@@ -551,7 +593,7 @@ void packet_print(rc_packet *packet)
 	}
 	// strip colors
 	else {
-		for (i = 0; (unsigned char) packet->data[i] != 0; ++i) {
+		for (i = 0; packet->data[i]!= 0; ++i) {
 			if ((unsigned char) packet->data[i] == 0xc2 && (unsigned char) packet->data[i+1] == 0xa7) {
 				i+=2;
 				continue;
@@ -595,12 +637,16 @@ int rcon_auth(int sock, char *passwd)
 	if (!ret)
 		return 0; // send failed
 
-	packet = net_recv_packet(sock);
-	if (packet == NULL)
+	rc_recv_packet *recv_packet = net_recv_packet(sock);
+	if (recv_packet == NULL) {
+		free(recv_packet->data);
 		return 0;
+	}
 
 	// return 1 if authentication OK
-	return packet->id == -1 ? 0 : 1;
+	int success_flag = recv_packet->id == -1 ? 0 : 1;
+	free(recv_packet->data);
+	return success_flag;
 }
 
 int rcon_command(int sock, char *command)
@@ -613,16 +659,21 @@ int rcon_command(int sock, char *command)
 
 	net_send_packet(sock, packet);
 
-	packet = net_recv_packet(sock);
-	if (packet == NULL)
-		return 0;
+	rc_recv_packet *recv_packet = net_recv_packet(sock);
 
-	if (packet->id != RCON_PID)
+	if (recv_packet == NULL) {
+		free(recv_packet->data);
 		return 0;
+	}
+
+	if (recv_packet->id != RCON_PID) {
+		free(recv_packet->data);
+		return 0;
+	}
 
 	if (!global_silent_mode) {
-		if (packet->size > 10)
-		packet_print(packet);
+		if (recv_packet->size > 10)
+		packet_print(recv_packet);
 	}
 
 	return 1;
